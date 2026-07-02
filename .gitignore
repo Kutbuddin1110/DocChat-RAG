@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 temp_*.pdf
 sample.pdf
+test_pdf/
+test_questions.md

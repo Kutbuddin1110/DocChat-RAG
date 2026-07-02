@@ -1,17 +1,32 @@
-from pypdf import PdfReader
+import pdfplumber
 
 def load_pdf_text(path):
-    reader = PdfReader(path)
     pages = []
-    for i, page in enumerate(reader.pages):
-        pages.append({"page_num": i + 1, "text": page.extract_text()})
+    with pdfplumber.open(path) as pdf:
+        for i, page in enumerate(pdf.pages):
+            text = page.extract_text() or ""
+            
+            # Extract tables separately and convert to readable text
+            tables = page.extract_tables()
+            table_text = ""
+            for table in tables:
+                for row in table:
+                    clean_row = [cell.strip() if cell else "" for cell in row]
+                    if any(clean_row):  # skip completely empty rows
+                        table_text += " | ".join(clean_row) + "\n"
+                table_text += "\n"  
+            
+            combined = (text + "\n" + table_text).strip()
+            pages.append({"page_num": i + 1, "text": combined})
     return pages
 
 def chunk_text(pages, chunk_size=500, overlap=50):
-    """Splits text into overlapping word chunks, keeping track of source page."""
     chunks = []
     for page in pages:
-        words = page["text"].split()
+        text = page["text"]
+        if not text or not text.strip():  # skip blank/None pages
+            continue
+        words = text.split()
         i = 0
         while i < len(words):
             chunk_words = words[i:i + chunk_size]
