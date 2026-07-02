@@ -31,63 +31,15 @@ if uploaded_files:
     if st.session_state.indexed_files:
         st.success(f"✅ Indexed: {', '.join(st.session_state.indexed_files)}")
 
-    question = st.text_input("Ask a question or request a diagram:")
+    question = st.text_input("Ask a question:")
     if question:
-        from generator import is_diagram_request, generate_diagram
-
-        if is_diagram_request(question):
-            with st.spinner("Generating diagram..."):
-                mermaid_output = generate_diagram(question)
-
-            if mermaid_output == "INSUFFICIENT_CONTEXT":
-                st.warning("Not enough information in the document to generate a diagram for this request.")
-                st.session_state.chat_history.append({
-                    "question": question,
-                    "answer": "Could not generate diagram — insufficient context in uploaded documents.",
-                    "type": "text"
-                })
-            else:
-                # clean up common LLM output noise around mermaid blocks
-                clean = mermaid_output.replace("```mermaid", "").replace("```", "").strip()
-
-                # render mermaid in streamlit using HTML component
-                mermaid_html = f"""
-                <div class="mermaid">
-                {clean}
-                </div>
-                <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-                <script>mermaid.initialize({{startOnLoad: true}});</script>
-                """
-                st.components.v1.html(mermaid_html, height=500, scrolling=True)
-                st.session_state.chat_history.append({
-                    "question": question,
-                    "answer": f"📊 Diagram generated from document context.",
-                    "type": "diagram",
-                    "mermaid": clean
-                })
-        else:
-            with st.spinner("Thinking..."):
-                answer = answer_question(question)
-            st.session_state.chat_history.append({
-                "question": question,
-                "answer": answer,
-                "type": "text"
-            })
+        with st.spinner("Thinking..."):
+            answer = answer_question(question)
+        st.session_state.chat_history.append({"question": question, "answer": answer})
 
     if st.session_state.chat_history:
         st.write("### Conversation History")
         for entry in reversed(st.session_state.chat_history):
             st.markdown(f"**You:** {entry['question']}")
-            if entry.get("type") == "diagram":
-                clean = entry["mermaid"]
-                mermaid_html = f"""
-                <div class="mermaid">
-                {clean}
-                </div>
-                <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-                <script>mermaid.initialize({{startOnLoad: true}});</script>
-                """
-                st.components.v1.html(mermaid_html, height=500, scrolling=True)
-            else:
-                st.markdown(f"**DocChat:** {entry['answer']}")
+            st.markdown(f"**DocChat:** {entry['answer']}")
             st.divider()
