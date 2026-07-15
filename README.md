@@ -1,2 +1,2 @@
-# Document Chat RAG
+# DocChat RAG
 
