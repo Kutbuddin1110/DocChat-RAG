@@ -1,45 +1,220 @@
 import streamlit as st
-from store import index_pdf, collection
+from store import index_document, collection
 from generator import answer_question
 import os
+import tempfile
+from store import get_indexed_documents
 
-st.title("📄 DocChat — Ask Questions About Your Documents")
+# --- Page Config ---
+st.set_page_config(
+    page_title="DocChat",
+    page_icon="📄",
+    layout="wide"
+)
 
-uploaded_files = st.file_uploader("Upload PDF(s)", type="pdf", accept_multiple_files=True)
+# --- Custom CSS for chat bubbles ---
+st.markdown("""
+<style>
+    /* Main chat area */
+    .main-header {
+        text-align: center;
+        padding: 1rem 0 0.5rem 0;
+        border-bottom: 1px solid #e0e0e0;
+        margin-bottom: 1rem;
+    }
+    
+    /* User bubble - right aligned */
+    .user-bubble {
+        display: flex;
+        justify-content: flex-end;
+        margin: 8px 0;
+    }
+    .user-bubble-inner {
+        background-color: #0084ff;
+        color: white;
+        padding: 10px 16px;
+        border-radius: 18px 18px 4px 18px;
+        max-width: 70%;
+        font-size: 0.95rem;
+        line-height: 1.4;
+    }
 
+    /* Bot bubble - left aligned */
+    .bot-bubble {
+        display: flex;
+        justify-content: flex-start;
+        margin: 8px 0;
+    }
+    .bot-bubble-inner {
+        background-color: #f0f2f6;
+        color: #1a1a1a;
+        padding: 10px 16px;
+        border-radius: 18px 18px 18px 4px;
+        max-width: 70%;
+        font-size: 0.95rem;
+        line-height: 1.4;
+    }
+
+    /* Avatar labels */
+    .avatar-you {
+        font-size: 0.75rem;
+        color: #888;
+        text-align: right;
+        margin-right: 4px;
+        margin-bottom: 2px;
+    }
+    .avatar-bot {
+        font-size: 0.75rem;
+        color: #888;
+        margin-left: 4px;
+        margin-bottom: 2px;
+    }
+
+    /* Chat container */
+    .chat-container {
+        padding: 1rem 0;
+    }
+
+    /* Sidebar styling */
+    section[data-testid="stSidebar"] {
+        background-color: #5a5b5c;
+    }
+
+    /* Input area */
+    .input-area {
+        position: sticky;
+        bottom: 0;
+        background: white;
+        padding-top: 1rem;
+        border-top: 1px solid #e0e0e0;
+    }
+
+    /* Hide default streamlit elements */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
+
+# --- Session State ---
 if "indexed_files" not in st.session_state:
-    st.session_state.indexed_files = set()
-
+    st.session_state.indexed_files = set(get_indexed_documents())
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-if uploaded_files:
-    for uploaded_file in uploaded_files:
-        if uploaded_file.name not in st.session_state.indexed_files:
-            pdf_path = f"temp_{uploaded_file.name}"
-            with open(pdf_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
+# --- Sidebar ---
+with st.sidebar:
+    st.markdown("## 📄 DocChat")
+    st.markdown("Ask questions about your PDF documents using AI.")
+    st.divider()
 
-            with st.spinner(f"Indexing {uploaded_file.name}..."):
-                success = index_pdf(pdf_path)  # CHANGED: capture return value
+    st.markdown("### Upload Documents")
+    uploaded_files = st.file_uploader(
+    "Upload one or more documents",
+    type=["pdf", "docx", "xlsx", "xls", "pptx", "txt"],
+    accept_multiple_files=True,
+    label_visibility="collapsed"
+    )
 
-            if not success:
-                st.error(f"⚠️ Could not extract text from '{uploaded_file.name}'. PDF may be image-rendered (OCR not yet supported).")
-            else:
-                st.session_state.indexed_files.add(uploaded_file.name)
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            if uploaded_file.name not in st.session_state.indexed_files:
                 
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{uploaded_file.name}") as tmp:
+                    tmp.write(uploaded_file.getbuffer())
+                    pdf_path = tmp.name
+
+                with st.spinner(f"Indexing {uploaded_file.name}..."):
+                    result = index_document(pdf_path)
+
+                os.remove(pdf_path)
+
+                if not result["success"]:
+                    st.error(f"⚠️ Could not index '{uploaded_file.name}': {result['error']}")
+                else:
+                    st.session_state.indexed_files.add(uploaded_file.name)
+
     if st.session_state.indexed_files:
-        st.success(f"✅ Indexed: {', '.join(st.session_state.indexed_files)}")
+        st.markdown("### 📚 Indexed Documents")
+        for fname in st.session_state.indexed_files:
+            st.markdown(f"✅ {fname}")
 
-    question = st.text_input("Ask a question:")
+        st.markdown("### 🔍 Answer From")
+        doc_options = ["All documents"] + sorted(st.session_state.indexed_files)
+        selected_doc = st.selectbox(
+            "Restrict answers to a single document",
+            doc_options,
+            label_visibility="collapsed",
+        )
+        st.session_state.doc_filter = None if selected_doc == "All documents" else selected_doc
+
+    st.divider()
+
+    if st.button("🗑️ Clear Chat", use_container_width=True):
+        st.session_state.chat_history = []
+        st.rerun()
+
+    st.markdown("---")
+    st.markdown(
+        "<div style='font-size:0.75rem; color:#888;'>Built with Sentence-Transformers, ChromaDB, Groq & Streamlit</div>",
+        unsafe_allow_html=True
+    )
+
+# --- Main Chat Area ---
+st.markdown(
+    "<div class='main-header'><h2>📄 DocChat</h2>"
+    "<p style='color:#888; font-size:0.9rem;'>Upload PDFs in the sidebar, then ask questions below</p></div>",
+    unsafe_allow_html=True
+)
+
+# Display chat history as bubbles
+if st.session_state.chat_history:
+    for entry in st.session_state.chat_history:
+        # User bubble
+        st.markdown(
+            f"<div class='avatar-you'>You</div>"
+            f"<div class='user-bubble'>"
+            f"<div class='user-bubble-inner'>{entry['question']}</div>"
+            f"</div>",
+            unsafe_allow_html=True
+        )
+        # Bot bubble
+        st.markdown(
+            f"<div class='avatar-bot'>DocChat</div>"
+            f"<div class='bot-bubble'>"
+            f"<div class='bot-bubble-inner'>{entry['answer']}</div>"
+            f"</div>",
+            unsafe_allow_html=True
+        )
+else:
+    if not st.session_state.indexed_files:
+        st.markdown(
+            "<div style='text-align:center; color:#aaa; margin-top:4rem;'>"
+            "<h3>👈 Upload a PDF to get started</h3>"
+            "</div>",
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(
+            "<div style='text-align:center; color:#aaa; margin-top:4rem;'>"
+            "<h3>💬 Ask a question about your documents</h3>"
+            "</div>",
+            unsafe_allow_html=True
+        )
+
+# --- Input ---
+st.markdown("<div class='input-area'>", unsafe_allow_html=True)
+
+if st.session_state.indexed_files:
+    question = st.chat_input("Ask a question about your documents...")
     if question:
-        with st.spinner("Thinking..."):
-            answer = answer_question(question)
-        st.session_state.chat_history.append({"question": question, "answer": answer})
+        with st.spinner("Searching documents..."):
+            answer = answer_question(question, doc_source=st.session_state.get("doc_filter"))
+        st.session_state.chat_history.append({
+            "question": question,
+            "answer": answer
+        })
+        st.rerun()
+else:
+    st.chat_input("Upload a PDF first to start asking questions...", disabled=True)
 
-    if st.session_state.chat_history:
-        st.write("### Conversation History")
-        for entry in reversed(st.session_state.chat_history):
-            st.markdown(f"**You:** {entry['question']}")
-            st.markdown(f"**DocChat:** {entry['answer']}")
-            st.divider()
+st.markdown("</div>", unsafe_allow_html=True)
