@@ -4,6 +4,7 @@ from generator import answer_question
 import os
 import tempfile
 from store import get_indexed_documents
+from agent import AgentRouter
 
 # --- Page Config ---
 st.set_page_config(
@@ -100,6 +101,10 @@ if "indexed_files" not in st.session_state:
     st.session_state.indexed_files = set(get_indexed_documents())
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+if "agent" not in st.session_state:
+    st.session_state.agent = AgentRouter()
+if "pending_websearch" not in st.session_state:
+    st.session_state.pending_websearch = None
 
 # --- Sidebar ---
 with st.sidebar:
@@ -201,18 +206,55 @@ else:
             unsafe_allow_html=True
         )
 
+if st.session_state.pending_websearch:
+    pending = st.session_state.pending_websearch
+    st.info("Your documents don't fully cover this. Want me to check the web?")
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("🔍 Search the web"):
+            agent = st.session_state.agent
+            with st.spinner("Searching the web..."):
+                web_result = agent.search_web(pending["query"])
+
+            if web_result["found"]:
+                web_answer = agent.generate_web_answer(pending["query"], web_result)
+                combined = agent.synthesize_hybrid(pending["query"], pending["doc_answer"], web_answer)
+                st.session_state.chat_history[pending["entry_index"]]["answer"] = combined
+            else:
+                st.warning("Web search didn't return anything useful.")
+
+            st.session_state.pending_websearch = None
+            st.rerun()
+    with col2:
+        if st.button("No, that's fine"):
+            st.session_state.pending_websearch = None
+            st.rerun()
+            
 # --- Input ---
 st.markdown("<div class='input-area'>", unsafe_allow_html=True)
 
 if st.session_state.indexed_files:
     question = st.chat_input("Ask a question about your documents...")
     if question:
+        agent = st.session_state.agent
         with st.spinner("Searching documents..."):
-            answer = answer_question(question, doc_source=st.session_state.get("doc_filter"))
-        st.session_state.chat_history.append({
-            "question": question,
-            "answer": answer
-        })
+            doc_result = agent.search_documents(question, doc_source=st.session_state.get("doc_filter"))
+
+        if doc_result["found"]:
+            doc_answer = agent.generate_doc_answer(question, doc_result)
+        else:
+            doc_answer = "This information is not available in the provided documents."
+
+        entry = {"question": question, "answer": doc_answer, "confidence": doc_result["confidence"]}
+        st.session_state.chat_history.append(entry)
+
+        # Low confidence -> offer (don't force) a web search
+        if doc_result["confidence"] < 0.55:
+            st.session_state.pending_websearch = {
+                "query": question,
+                "doc_answer": doc_answer,
+                "entry_index": len(st.session_state.chat_history) - 1,
+            }
         st.rerun()
 else:
     st.chat_input("Upload a PDF first to start asking questions...", disabled=True)
