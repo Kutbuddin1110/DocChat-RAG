@@ -25,12 +25,12 @@ def index_document(file_path):
         
         if not pages:
             logger.error(f"No text extracted from {file_path}")
-            return {"success": False, "chunks": 0, "error": "Could not extract text from PDF"}
+            return {"success": False, "chunks": 0, "error": f"Could not extract text from {os.path.basename(file_path)}"}
 
         chunks = chunk_text(pages)
         if not chunks:
             logger.error(f"No chunks generated from {file_path}")
-            return {"success": False, "chunks": 0, "error": "Could not chunk document"}
+            return {"success": False, "chunks": 0, "error": f"Could not chunk document {os.path.basename(file_path)}"}
 
         texts = [c["text"] for c in chunks]
         embeddings = model.encode(texts, show_progress_bar=True).tolist()
